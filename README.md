@@ -1,4 +1,6 @@
-# OpenVPN
+# OpenVPN for Linux
+
+[built & tested on KDE Plasma v6.7.5]
 
 A small native Linux VPN app built with [GPUI](https://gpui.rs/). Import an OpenVPN configuration, save it under a profile name, and connect. Multiple profiles are supported.
 This project is a GPUI application and uses NetworkManager as its VPN backend.
