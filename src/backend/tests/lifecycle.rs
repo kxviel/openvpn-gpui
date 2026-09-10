@@ -1,7 +1,7 @@
 //! Deterministic disconnect tests. Every command is intercepted by the closure;
 //! these tests never invoke nmcli or change the host's network configuration.
 
-use super::disconnect_uuid_with;
+use super::super::connection::disconnect_uuid_with;
 use anyhow::{Result, anyhow};
 use std::collections::VecDeque;
 use uuid::Uuid;
