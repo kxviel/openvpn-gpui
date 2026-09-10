@@ -6,11 +6,17 @@ A focused GPUI desktop app for importing named OpenVPN profiles and connecting t
 
 ## State and rendering
 
-`app.rs` owns the selected screen, imported profiles, credential inputs, file-picker state, and observed VPN state. `ui.rs` renders those values and dispatches explicit actions. It does not run network commands during rendering. A background worker handles NetworkManager operations; the UI receives updates through a channel.
+`app/mod.rs` owns the selected screen, imported profiles, credential inputs, file-picker state, and observed VPN state. `app/navigation.rs` handles screen transitions, `app/commands.rs` handles user actions, and `app/events.rs` applies backend updates on the UI thread.
+
+`ui/mod.rs` composes the app shell and selected screen. Each screen lives in `ui/screens/`, while shared controls, credential fields, and feedback live in `ui/components/`. Colors and embedded asset registration live in `ui/theme.rs` and `ui/assets.rs`. Rendering dispatches actions without running network commands. The existing GPUI entity remains the single owner of app state across screens.
+
+`backend/mod.rs` exposes request/event types and the worker handle. `backend/worker.rs` owns the background thread, request dispatch, status monitoring and shutdown; `backend/nmcli.rs` owns bounded subprocess execution and response parsing. Connection lifecycle operations and NetworkManager profile operations live in `backend/connection.rs` and `backend/profiles.rs`, respectively.
 
 The connection states are idle, connecting, connected, disconnecting, and unavailable. Only NetworkManager's `activated` state produces the connected screen. Monitoring failures produce an unavailable state rather than a false connected indicator.
 
 ## Profiles
+
+`profile/mod.rs` defines the models and exposes the profile API. Private metadata persistence lives in `profile/storage.rs`, password handling in `profile/credentials.rs`, and configuration bundling in `profile/config.rs`. This module has no GPUI or NetworkManager subprocess dependency.
 
 Each profile has an app UUID and a separate NetworkManager UUID. A profile name is display text, never a process identifier. Imported files are bundled into a private per-profile directory. Metadata writes are atomic. A process lock prevents concurrent app instances from racing saves.
 
@@ -27,3 +33,5 @@ The shared disconnect path uses [NetworkManager connection deactivation](https:/
 ## Verification
 
 Unit tests cover file bundling and permissions, credentials, name validation, persistence/corruption handling, UUID/state parsing, and disconnect races/failures. An opt-in local integration test covers two-profile import, credential persistence, cancellation, asynchronous shutdown, fallback worker-drop cleanup, base-connection routes/DNS preservation, and removal. Visual checks cover native Linux screens. The loopback test never establishes an authenticated tunnel; full DFKI route/DNS teardown remains a real-configuration check.
+
+Profile tests are in `profile/tests.rs`. Backend parsing and deterministic lifecycle tests are in `backend/tests/`; the NetworkManager integration test is isolated in `backend/tests/networkmanager.rs` and remains ignored unless explicitly selected. The module reorganization preserves the profile format, command arguments, timeout values, event ordering, and UI layout.

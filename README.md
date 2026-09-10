@@ -73,18 +73,40 @@ If a saved configuration contains credentials, the copied files retain those cre
 
 ## Source structure
 
-The flat modules, explicit constants, crate-scoped types, and helper functions follow the conventions in your IcyMap project.
+The code is organized by responsibility, using Rust modules with shared UI components and one module per screen. The app owns state and actions; rendering, NetworkManager operations, and local profile storage remain separate.
 
 ```text
 src/
-├── main.rs       # window, theme, embedded assets, single-instance lock
-├── app.rs        # app state, events, file picker, connection actions
-├── ui.rs         # connection screen, profile list, settings and import forms
-├── backend.rs    # bounded NetworkManager operations and status monitoring
-└── profile.rs    # profile metadata, private storage, config bundling
-assets/          # embedded UI icons and generated Linux app icons
-scripts/         # user-local installation
+├── main.rs                # startup, window, signals and single-instance lock
+├── app/
+│   ├── mod.rs             # app state and initialization
+│   ├── navigation.rs      # screen transitions and form reset behavior
+│   ├── commands.rs        # user actions, validation and file picker
+│   └── events.rs          # backend events and UI refresh loop
+├── ui/
+│   ├── mod.rs             # app shell, routing and fixed footer
+│   ├── screens/           # connection, profiles, settings and import
+│   ├── components/        # shared controls, login fields and feedback
+│   ├── theme.rs           # palette and native control theme
+│   └── assets.rs          # embedded icon registration
+├── backend/
+│   ├── mod.rs             # request/event types and backend entry point
+│   ├── worker.rs          # worker lifecycle, dispatch and status monitoring
+│   ├── nmcli.rs           # bounded subprocesses and response parsing
+│   ├── connection.rs      # connect, disconnect and cleanup verification
+│   ├── profiles.rs        # NetworkManager profile operations
+│   └── tests/             # deterministic tests and opt-in integration test
+└── profile/
+    ├── mod.rs             # profile models and validation
+    ├── storage.rs         # private directories and atomic metadata writes
+    ├── credentials.rs     # credential validation and password storage
+    ├── config.rs          # configuration validation and file bundling
+    └── tests.rs           # local profile regression tests
+assets/                    # UI icons and Linux app icons
+scripts/                   # user-local installation
 ```
+
+To change a screen, start in `src/ui/screens/`; shared controls belong in `src/ui/components/`. Keep user actions in `src/app/commands.rs` and network side effects in `src/backend/`. Internal modules stay private, with only the existing app-facing types and functions exposed through each module's `mod.rs`.
 
 ## Checks
 
