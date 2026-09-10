@@ -1,6 +1,4 @@
-# OpenVPN for Linux
-
-[built & tested on KDE Plasma v6.7.5]
+# OpenVPN
 
 A small native Linux VPN app built with [GPUI](https://gpui.rs/). Import an OpenVPN configuration, save it under a profile name, and connect. Multiple profiles are supported.
 This project is a GPUI application and uses NetworkManager as its VPN backend.
@@ -25,22 +23,27 @@ The installer runs as your normal user. It installs `~/.local/bin/openvpn-gpui`,
 
 ## Use
 
-1. Click **Import configuration** or the **+** button.
-2. Choose the `.ovpn` or `.conf` supplied by DFKI, enter a profile name, and click **Save profile**.
-3. Click **Connect**. Complete any authentication prompt shown by your desktop.
-4. Click **Disconnect** to end the connection. You can also cancel an attempt while it is connecting.
+1. Click **Add profile**.
+2. Choose your `.ovpn` or `.conf` file and enter a profile name.
+3. Optionally enter a username and password, then click **Import profile**. To add or replace a login later, open **Profile settings** from the connection card or the profile list.
+4. Click **Connect**. Profiles without a saved login continue to use your desktop's authentication prompt.
+5. Click **Disconnect** to end the connection. You can also cancel an attempt while it is connecting.
 
-Click the profile card to choose a saved profile, add another, or remove the selected profile. Profile changes are disabled while its tunnel is active. Removing a profile requires a second click and deletes that profile's NetworkManager connection and the app's saved files; it does not delete the original download.
+Open **Profiles** to choose a saved connection. Each profile has its own settings screen with username and password fields. Settings remain viewable while connected; disconnect before changing them. Removing a profile requires confirmation and deletes that profile's NetworkManager connection and the app's saved files; it does not delete the original download.
 
-Closing the app leaves active or pending connections managed by NetworkManager. Reopen the app to see the selected profile's current state and disconnect it. The duration counter measures the time the current app instance has observed the tunnel connected; it restarts when you reopen the app. Addresses come from the selected VPN connection, not a hard-coded network interface.
+**Disconnect and closing the app stop its VPN connections**, including a pending connection attempt. The app waits for NetworkManager to confirm deactivation, which releases the VPN tunnel's routes and DNS configuration while keeping the underlying Wi-Fi or Ethernet connection active. Saved profiles and logins are retained for reconnecting. Other VPNs outside this app's profile library are not affected.
 
-Keyboard shortcuts: **Ctrl+O** imports a profile, **Ctrl+P** opens saved profiles, **Esc** returns to the connection screen, and **Ctrl+Q** closes the app. Form controls support keyboard navigation and standard text editing.
+The window stays open with an error if normal exit cleanup fails. Window close, **Ctrl+Q**, SIGINT and SIGTERM share this cleanup flow. Forced termination such as SIGKILL or a system crash cannot run application cleanup; NetworkManager may retain a tunnel in that case.
+
+The duration counter measures the time the current app instance has observed the tunnel connected. Addresses come from the selected VPN connection.
+
+Keyboard shortcuts: **Ctrl+O** imports a profile, **Ctrl+P** opens saved profiles, **Esc** goes back, and **Ctrl+Q** disconnects and closes the app. Form controls support keyboard navigation and standard text editing.
 
 ## Requirements
 
 - Linux with a Wayland or X11 desktop and a working Vulkan driver.
 - NetworkManager, `nmcli`, OpenVPN, and the NetworkManager OpenVPN plugin.
-- A desktop NetworkManager secret agent, such as KDE Plasma's network applet or `nm-applet`, for password prompts. The app does not collect passwords or send them on command lines.
+- A desktop NetworkManager secret agent, such as KDE Plasma's network applet or `nm-applet`, if you want password prompts instead of a saved profile login.
 - An XDG desktop portal and a matching desktop backend for the file picker.
 - A current Rust toolchain and GPUI's Linux build dependencies.
 
@@ -56,9 +59,11 @@ Keep your desktop's portal backend and Vulkan GPU driver installed. This machine
 
 ## Profiles and compatibility
 
-Profile metadata and copied configurations are stored under `$XDG_DATA_HOME/openvpn-gpui`, normally `~/.local/share/openvpn-gpui`. Directories are private to your user, files have mode `0600`, and metadata is saved atomically. External certificates and keys are copied and their references rewritten, so moving the original files does not break a saved profile. Inline certificates use unique config names to avoid collisions in NetworkManager's import storage.
+Profile metadata, copied configurations, and optional saved passwords are stored under `$XDG_DATA_HOME/openvpn-gpui`, normally `~/.local/share/openvpn-gpui`. Directories are private to your user, sensitive files have mode `0600`, and metadata is saved atomically. Passwords are kept out of profile JSON and process arguments; `nmcli` reads them through its password-file interface when connecting. External certificates and keys are copied and their references rewritten, so moving the original files does not break a saved profile. Inline certificates use unique config names to avoid collisions in NetworkManager's import storage.
 
 NetworkManager owns the tunnel, routes, DNS, and authentication. The app does not change a profile into a full-tunnel VPN or claim all internet traffic is protected: routing follows the imported configuration and NetworkManager's handling of it. Its connection entries are named `OpenVPN · <profile name>`, have autoconnect disabled, and are identified by their exact NetworkManager UUID.
+
+Saved passwords are plaintext files protected by user-only filesystem permissions, not an encrypted keyring.
 
 Only configurations supported by NetworkManager's OpenVPN importer are supported. Configurations requiring executable hooks, plugins, or nested config files are rejected with an explanation. Browser SSO is not implemented by this app; setups that require OpenVPN 3's browser authentication need additional backend work. An actual DFKI login cannot be verified without your DFKI configuration and authentication.
 
@@ -72,7 +77,7 @@ The flat modules, explicit constants, crate-scoped types, and helper functions f
 src/
 ├── main.rs       # window, theme, embedded assets, single-instance lock
 ├── app.rs        # app state, events, file picker, connection actions
-├── ui.rs         # connection screen, profile list, import form
+├── ui.rs         # connection screen, profile list, settings and import forms
 ├── backend.rs    # bounded NetworkManager operations and status monitoring
 └── profile.rs    # profile metadata, private storage, config bundling
 assets/          # embedded UI icons and generated Linux app icons
@@ -87,7 +92,7 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-The optional integration test creates two disposable NetworkManager profiles, verifies import and selection persistence, starts a connection to a loopback discard port, cancels it, verifies no tunnel remains active, then deletes the test profiles. It requires `openssl` and may produce desktop network notifications. It does not connect to DFKI or any external VPN server.
+The optional integration test creates two disposable NetworkManager profiles, verifies credentials and selection persistence, starts a connection to a loopback discard port, then tests cancellation, shutdown during activation, and worker-drop cleanup. It checks the existing Wi-Fi/Ethernet connection's routes and DNS are unchanged, then deletes the test profiles. It requires `openssl` and may produce desktop network notifications. It does not connect to DFKI or any external VPN server; teardown after an authenticated VPN session requires a real configuration and login.
 
 ```bash
 cargo test --locked networkmanager_import_cancel_and_remove -- --ignored
@@ -98,4 +103,5 @@ For visual development, debug builds support starting on a screen without automa
 ```bash
 OPENVPN_GPUI_SCREEN=import cargo run --locked
 OPENVPN_GPUI_SCREEN=profiles cargo run --locked
+OPENVPN_GPUI_SCREEN=settings cargo run --locked
 ```
