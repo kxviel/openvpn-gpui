@@ -6,7 +6,7 @@ A focused GPUI desktop app for importing named OpenVPN profiles and connecting t
 
 ## State and rendering
 
-`app.rs` owns the selected screen, imported profiles, file-picker state, and observed VPN state. `ui.rs` renders those values and dispatches explicit actions. It does not run network commands during rendering. A background worker handles NetworkManager operations; the UI receives updates through a channel.
+`app.rs` owns the selected screen, imported profiles, credential inputs, file-picker state, and observed VPN state. `ui.rs` renders those values and dispatches explicit actions. It does not run network commands during rendering. A background worker handles NetworkManager operations; the UI receives updates through a channel.
 
 The connection states are idle, connecting, connected, disconnecting, and unavailable. Only NetworkManager's `activated` state produces the connected screen. Monitoring failures produce an unavailable state rather than a false connected indicator.
 
@@ -18,10 +18,12 @@ The importer retains OpenVPN directives supported by NetworkManager, preserves i
 
 ## Connection lifecycle
 
-Commands use argument arrays, fixed locale, bounded execution time, and private output handles. Authentication is delegated to the desktop's NetworkManager secret agent. Cancellation first interrupts the pending `nmcli` command, then explicitly deactivates that exact connection UUID, because killing `nmcli` alone does not cancel NetworkManager activation.
+Commands use argument arrays, fixed locale, bounded execution time, and private output handles. Profiles can delegate authentication to the desktop's NetworkManager secret agent or use a saved per-profile password file with mode `0600`. The password-file path—not its contents—is passed to `nmcli`, keeping passwords out of process arguments. Cancellation first interrupts the pending `nmcli` command, then explicitly deactivates that exact connection UUID, because killing `nmcli` alone does not cancel NetworkManager activation.
 
-NetworkManager continues to own connections when the window closes. The app refreshes the selected profile after reopening. The displayed duration is observed uptime for the current app instance.
+Window close, Ctrl+Q, SIGINT and SIGTERM request asynchronous shutdown. Pending activation is cancelled, all active UUIDs in the app's profile library are deactivated, and the worker confirms their absence before allowing the process to exit. Failure keeps the window open for retry. The backend's Drop handler cancels, requests cleanup and joins the worker as a fallback for application-level exits.
+
+The shared disconnect path uses [NetworkManager connection deactivation](https://networkmanager.pages.freedesktop.org/NetworkManager/NetworkManager/nmcli.html), allowing NetworkManager to withdraw the VPN's routes and DNS contributions. It preserves the physical connection, saved VPN profiles, and unrelated tunnels. It never flushes the routing table, rewrites resolv.conf, or restarts Wi-Fi. Forced kills cannot run cleanup.
 
 ## Verification
 
-Unit tests cover file bundling and permissions, unsupported configs, profile-name validation, persistence/corruption handling, exact UUID parsing, and connection-state parsing. An opt-in local integration test covers two-profile import, selection persistence, process startup/cancellation, and removal. Visual checks cover the native Linux screens. Real DFKI authentication remains a user configuration check.
+Unit tests cover file bundling and permissions, credentials, name validation, persistence/corruption handling, UUID/state parsing, and disconnect races/failures. An opt-in local integration test covers two-profile import, credential persistence, cancellation, asynchronous shutdown, fallback worker-drop cleanup, base-connection routes/DNS preservation, and removal. Visual checks cover native Linux screens. The loopback test never establishes an authenticated tunnel; full DFKI route/DNS teardown remains a real-configuration check.

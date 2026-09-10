@@ -5,12 +5,16 @@ mod ui;
 
 use gpui::*;
 use gpui_component::{Root, Theme, ThemeMode};
-use std::{borrow::Cow, fs::OpenOptions};
+use std::{
+    borrow::Cow,
+    fs::OpenOptions,
+    sync::{Arc, atomic::AtomicBool},
+};
 
-const WINDOW_WIDTH: f32 = 420.0;
-const WINDOW_HEIGHT: f32 = 720.0;
-const MIN_WINDOW_WIDTH: f32 = 390.0;
-const MIN_WINDOW_HEIGHT: f32 = 660.0;
+const WINDOW_WIDTH: f32 = 460.0;
+const WINDOW_HEIGHT: f32 = 780.0;
+const MIN_WINDOW_WIDTH: f32 = 420.0;
+const MIN_WINDOW_HEIGHT: f32 = 700.0;
 
 struct Assets;
 impl AssetSource for Assets {
@@ -23,6 +27,10 @@ impl AssetSource for Assets {
             "file.svg" => include_bytes!("../assets/file.svg"),
             "close.svg" => include_bytes!("../assets/close.svg"),
             "back.svg" => include_bytes!("../assets/back.svg"),
+            "menu.svg" => include_bytes!("../assets/menu.svg"),
+            "trash.svg" => include_bytes!("../assets/trash.svg"),
+            "lock.svg" => include_bytes!("../assets/lock.svg"),
+            "settings.svg" => include_bytes!("../assets/settings.svg"),
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(bytes)))
@@ -45,6 +53,10 @@ fn main() -> anyhow::Result<()> {
     if fs2::FileExt::try_lock_exclusive(&lock).is_err() {
         eprintln!("OpenVPN is already running. Use the existing window.");
         return Ok(());
+    }
+    let exit_requested = Arc::new(AtomicBool::new(false));
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        signal_hook::flag::register(signal, exit_requested.clone())?;
     }
     Application::new().with_assets(Assets).run(move |cx| {
         gpui_component::init(cx);
@@ -95,7 +107,13 @@ fn main() -> anyhow::Result<()> {
             },
             |window, cx| {
                 window.set_window_title("OpenVPN");
-                let view = cx.new(|cx| app::VpnApp::new(root, window, cx));
+                let view = cx.new(|cx| app::VpnApp::new(root, exit_requested, window, cx));
+                let closing = view.downgrade();
+                window.on_window_should_close(cx, move |_, cx| {
+                    closing
+                        .update(cx, |view, cx| view.request_quit(cx))
+                        .is_err()
+                });
                 cx.new(|cx| Root::new(view, window, cx))
             },
         )

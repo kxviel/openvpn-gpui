@@ -16,10 +16,10 @@ dirs = "6"
 shell-words = "1"
 tempfile = "3"
 fs2 = "0.4"
+signal-hook = "0.3"
 
 [profile.dev]
 debug = 0
 
 [profile.release]
 strip = true
-

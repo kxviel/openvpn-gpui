@@ -15,6 +15,10 @@ pub(crate) struct Profile {
     pub(crate) name: String,
     pub(crate) remote: String,
     pub(crate) protocol: String,
+    #[serde(default)]
+    pub(crate) username: String,
+    #[serde(default)]
+    pub(crate) has_password: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -68,6 +72,50 @@ pub(crate) fn config_path(destination: &Path) -> PathBuf {
     ))
 }
 
+pub(crate) fn credentials_path(root: &Path, id: Uuid) -> PathBuf {
+    root.join(id.to_string()).join("credentials")
+}
+
+pub(crate) fn validate_credentials(
+    username: &str,
+    password: &str,
+    has_saved_password: bool,
+) -> Result<(String, Option<String>)> {
+    let username = username.trim();
+    if username.is_empty()
+        || username.chars().count() > 255
+        || username
+            .chars()
+            .any(|character| character.is_control() || character == ',')
+    {
+        bail!("Enter a username between 1 and 255 characters without commas.");
+    }
+    if password.is_empty() {
+        if has_saved_password {
+            return Ok((username.to_owned(), None));
+        }
+        bail!("Enter a password to save with this profile.");
+    }
+    if password.chars().count() > 4096 || password.chars().any(char::is_control) {
+        bail!("The password is too long or contains unsupported control characters.");
+    }
+    Ok((username.to_owned(), Some(password.to_owned())))
+}
+
+pub(crate) fn save_password(root: &Path, id: Uuid, password: &str) -> Result<()> {
+    let directory = root.join(id.to_string());
+    private_dir(&directory)?;
+    let mut file = tempfile::NamedTempFile::new_in(&directory)?;
+    file.as_file_mut()
+        .set_permissions(fs::Permissions::from_mode(0o600))?;
+    // nmcli's passwd-file format keeps the secret out of process arguments.
+    writeln!(file, "vpn.secrets.password:{password}")?;
+    file.as_file().sync_all()?;
+    file.persist(credentials_path(root, id))?;
+    fs::File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
 pub(crate) fn load(root: &Path) -> Result<Profiles> {
     let path = root.join("profiles.json");
     if !path.exists() {
@@ -75,6 +123,9 @@ pub(crate) fn load(root: &Path) -> Result<Profiles> {
     }
     let mut profiles: Profiles = serde_json::from_slice(&fs::read(&path)?)
         .context("Cannot read saved profiles. The existing file has been preserved.")?;
+    for profile in &mut profiles.profiles {
+        profile.has_password = credentials_path(root, profile.id).is_file();
+    }
     if profiles.selected().is_none() {
         profiles.selected = profiles.profiles.first().map(|p| p.id);
     }
@@ -296,6 +347,8 @@ mod tests {
                 name: "DFKI".into(),
                 remote: "vpn.example.test".into(),
                 protocol: "UDP · 1194".into(),
+                username: String::new(),
+                has_password: false,
             }],
             selected: Some(id),
         };
@@ -310,5 +363,45 @@ mod tests {
             fs::read_to_string(tmp.path().join("profiles.json")).unwrap(),
             "broken"
         );
+    }
+
+    #[test]
+    fn credentials_are_validated_and_saved_privately() {
+        let tmp = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let (username, password) =
+            validate_credentials("  sam.samples  ", "secret phrase", false).unwrap();
+        assert_eq!(username, "sam.samples");
+        save_password(tmp.path(), id, password.as_deref().unwrap()).unwrap();
+        let path = credentials_path(tmp.path(), id);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "vpn.secrets.password:secret phrase\n"
+        );
+        let profiles = Profiles {
+            profiles: vec![Profile {
+                id,
+                nm_uuid: Uuid::new_v4(),
+                name: "Office".into(),
+                remote: "vpn.example.test".into(),
+                protocol: "UDP · 1194".into(),
+                username: username.clone(),
+                has_password: false,
+            }],
+            selected: Some(id),
+        };
+        save(tmp.path(), &profiles).unwrap();
+        assert!(load(tmp.path()).unwrap().selected().unwrap().has_password);
+        assert!(validate_credentials("sam", "", false).is_err());
+        assert_eq!(
+            validate_credentials("sam", "", true).unwrap(),
+            ("sam".into(), None)
+        );
+        assert!(validate_credentials("samples,sam", "secret", false).is_err());
+        assert!(validate_credentials("sam", "line\nbreak", false).is_err());
     }
 }
